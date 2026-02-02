@@ -11,36 +11,37 @@ const MONGODB_URI = process.env.MONGODB_URI;
 const markup = (price) => Math.round(price * 1.10);
 
 // Real inventory data from screenshots (100 total units)
+// All prices have 10% markup applied
 const products = [
   // === IPHONES (60 units) ===
   {
     name: 'iPhone 13 mini',
     model: 'iPhone 13 mini',
     storage: '128GB',
-    price: markup(243), // Retail with markup
-    wholesalePrice: 243,
+    price: markup(243),
+    wholesalePrice: markup(243), // $267
     category: 'iPhone',
     inStock: true,
     variations: [
-      { storage: '128GB', grade: 'A2', color: 'Red', price: 243, stock: 8, origin: 'US' },
-      { storage: '128GB', grade: 'A2', color: 'Black', price: 243, stock: 4, origin: 'US' },
-      { storage: '128GB', grade: 'A2', color: 'White', price: 243, stock: 4, origin: 'US' },
-      { storage: '128GB', grade: 'A2', color: 'Blue', price: 243, stock: 3, origin: 'US' },
-      { storage: '128GB', grade: 'A2', color: 'Pink', price: 243, stock: 3, origin: 'US' },
-      { storage: '128GB', grade: 'A2', color: 'Green', price: 243, stock: 1, origin: 'US' },
+      { storage: '128GB', grade: 'A2', color: 'Red', price: markup(243), stock: 8, origin: 'US' },
+      { storage: '128GB', grade: 'A2', color: 'Black', price: markup(243), stock: 4, origin: 'US' },
+      { storage: '128GB', grade: 'A2', color: 'White', price: markup(243), stock: 4, origin: 'US' },
+      { storage: '128GB', grade: 'A2', color: 'Blue', price: markup(243), stock: 3, origin: 'US' },
+      { storage: '128GB', grade: 'A2', color: 'Pink', price: markup(243), stock: 3, origin: 'US' },
+      { storage: '128GB', grade: 'A2', color: 'Green', price: markup(243), stock: 1, origin: 'US' },
     ]
   },
   {
     name: 'iPhone 13',
     model: 'iPhone 13',
     storage: '256GB',
-    price: markup(290), // Average of 280 and 300
-    wholesalePrice: 290,
+    price: markup(290),
+    wholesalePrice: markup(290), // $319
     category: 'iPhone',
     inStock: true,
     variations: [
-      { storage: '256GB', grade: 'B1 (Low Batt)', color: 'Green', price: 280, stock: 9, origin: 'US' },
-      { storage: '256GB', grade: 'B1 (Low Batt)', color: 'Red', price: 300, stock: 5, origin: 'US' },
+      { storage: '256GB', grade: 'B1 (Low Batt)', color: 'Green', price: markup(280), stock: 9, origin: 'US' }, // $308
+      { storage: '256GB', grade: 'B1 (Low Batt)', color: 'Red', price: markup(300), stock: 5, origin: 'US' }, // $330
     ]
   },
   {
@@ -48,11 +49,11 @@ const products = [
     model: 'iPhone 14 Pro',
     storage: '128GB',
     price: markup(330),
-    wholesalePrice: 330,
+    wholesalePrice: markup(330), // $363
     category: 'iPhone',
     inStock: true,
     variations: [
-      { storage: '128GB', grade: 'B1', color: 'Black', price: 330, stock: 10, origin: 'US' },
+      { storage: '128GB', grade: 'B1', color: 'Black', price: markup(330), stock: 10, origin: 'US' },
     ]
   },
   {
@@ -60,11 +61,11 @@ const products = [
     model: 'iPhone 15',
     storage: '128GB',
     price: markup(395),
-    wholesalePrice: 395,
+    wholesalePrice: markup(395), // $435
     category: 'iPhone',
     inStock: true,
     variations: [
-      { storage: '128GB', grade: 'A2', color: 'Blue', price: 395, stock: 10, origin: 'US' },
+      { storage: '128GB', grade: 'A2', color: 'Blue', price: markup(395), stock: 10, origin: 'US' },
     ]
   },
   {
@@ -72,11 +73,11 @@ const products = [
     model: 'iPhone 16 Pro',
     storage: '128GB',
     price: markup(665),
-    wholesalePrice: 665,
+    wholesalePrice: markup(665), // $732
     category: 'iPhone',
     inStock: true,
     variations: [
-      { storage: '128GB', grade: 'A2', color: 'Black', price: 665, stock: 3, origin: 'US' },
+      { storage: '128GB', grade: 'A2', color: 'Black', price: markup(665), stock: 3, origin: 'US' },
     ]
   },
 
@@ -86,11 +87,11 @@ const products = [
     model: 'iPad Air 3',
     storage: '64GB',
     price: markup(70),
-    wholesalePrice: 70,
+    wholesalePrice: markup(70), // $77
     category: 'iPad',
     inStock: true,
     variations: [
-      { storage: '64GB', grade: 'B1', color: 'Gold', price: 70, stock: 1, origin: 'US' },
+      { storage: '64GB', grade: 'B1', color: 'Gold', price: markup(70), stock: 1, origin: 'US' },
     ]
   },
   {
@@ -98,11 +99,11 @@ const products = [
     model: 'iPad 9th Gen',
     storage: '64GB',
     price: markup(185),
-    wholesalePrice: 185,
+    wholesalePrice: markup(185), // $204
     category: 'iPad',
     inStock: true,
     variations: [
-      { storage: '64GB', grade: 'B2', color: 'Space Gray', price: 185, stock: 33, origin: 'US' },
+      { storage: '64GB', grade: 'B2', color: 'Space Gray', price: markup(185), stock: 33, origin: 'US' },
     ]
   },
   {
@@ -110,11 +111,11 @@ const products = [
     model: 'iPad 6th Gen',
     storage: '32GB',
     price: markup(125),
-    wholesalePrice: 125,
+    wholesalePrice: markup(125), // $138
     category: 'iPad',
     inStock: true,
     variations: [
-      { storage: '32GB', grade: 'B2', color: 'Space Gray', price: 125, stock: 6, origin: 'US' },
+      { storage: '32GB', grade: 'B2', color: 'Space Gray', price: markup(125), stock: 6, origin: 'US' },
     ]
   },
 ];

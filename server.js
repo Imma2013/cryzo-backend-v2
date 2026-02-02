@@ -17,7 +17,9 @@ app.use(cors({
     'http://localhost:5174',
     'http://localhost:5175',
     'http://localhost:5176',
-    'https://frontend-v2-37fk.onrender.com'
+    'https://frontend-v2-37fk.onrender.com',
+    'https://cryzo.me',
+    'https://www.cryzo.me'
   ],
   credentials: true
 }));

@@ -28,11 +28,11 @@ const selectModel = (userQuery) => {
     query.includes("quote") ||
     query.split(' ').length > 10
   ) {
-    return { name: "gemini-2.5-pro-preview-05-06", type: "Pro" };
+    return { name: "gemini-3-pro-preview", type: "Pro" };
   }
 
   // Default to Flash for speed
-  return { name: "gemini-2.0-flash", type: "Flash" };
+  return { name: "gemini-3-flash-preview", type: "Flash" };
 };
 
 // Contact endpoint
@@ -447,8 +447,8 @@ router.post('/chat', async (req, res) => {
       inventorySummary += `• ${p.model} ${p.storage} ${p.variations?.[0]?.grade || ''}: ${variations}\n`;
     });
 
-    // Use Pro model for better understanding (Gemini 2.5 Pro)
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-pro-preview-05-06' });
+    // Use Pro model for better understanding (Gemini 3 Pro)
+    const model = genAI.getGenerativeModel({ model: 'gemini-3-pro-preview' });
 
     const systemPrompt = `You are Cryzo Copilot, the AI assistant for Cryzo - a wholesale iPhone and iPad marketplace.
 

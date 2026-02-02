@@ -7,7 +7,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // Model selection - Use Pro for complex queries, Flash for simple
-// Gemini 2.0 Flash for quick tasks, Gemini 1.5 Pro for complex reasoning
+// Gemini 2.5 Pro for complex reasoning, Gemini 2.0 Flash for quick tasks
 const selectModel = (userQuery) => {
   const query = userQuery.toLowerCase();
 
@@ -26,10 +26,10 @@ const selectModel = (userQuery) => {
     query.includes("what do you think") ||
     query.split(' ').length > 12
   ) {
-    return { name: "gemini-1.5-pro-latest", type: "Pro" };
+    return { name: "gemini-2.5-pro-preview-05-06", type: "Pro" };
   }
 
-  // Default to Flash 2.0 for speed
+  // Default to Flash for speed
   return { name: "gemini-2.0-flash", type: "Flash" };
 };
 
@@ -446,7 +446,7 @@ router.post('/chat', async (req, res) => {
     });
 
     // Use Pro model for better understanding
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro-latest' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-pro-preview-05-06' });
 
     const systemPrompt = `You are Cryzo Copilot, the AI assistant for Cryzo - a wholesale iPhone and iPad marketplace.
 

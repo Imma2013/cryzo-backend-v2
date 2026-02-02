@@ -6,8 +6,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 // Initialize Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Model selection based on query complexity
-// Using correct Google AI SDK model names
+// Model selection - Use Pro for complex queries, Flash for simple
 const selectModel = (userQuery) => {
   const query = userQuery.toLowerCase();
 
@@ -20,12 +19,14 @@ const selectModel = (userQuery) => {
     query.includes("which") ||
     query.includes("should i") ||
     query.includes("difference") ||
-    query.split(' ').length > 8
+    query.includes("why") ||
+    query.includes("explain") ||
+    query.split(' ').length > 10
   ) {
-    return { name: "gemini-2.0-flash", type: "Pro" };
+    return { name: "gemini-1.5-pro", type: "Pro" };
   }
 
-  // Default to Flash for speed
+  // Default to Flash 2.0 for speed
   return { name: "gemini-2.0-flash", type: "Flash" };
 };
 
@@ -202,10 +203,17 @@ RESPOND WITH VALID JSON ONLY (no markdown, no code blocks):
   "filters": {
     "category": "iPhone" or "iPad" or null,
     "models": ["iPhone 15", "iPhone 14"] or null,
-    "grades": ["Brand New", "Refurb A"] or null,
+    "storage": "256GB" or null (if user specified a storage size),
+    "grades": ["A2", "B1"] or null,
+    "colors": ["Black", "Blue"] or null,
     "origins": ["US", "JP"] or null,
     "maxPrice": number or null,
     "minPrice": number or null
+  },
+  "preselect": {
+    "storage": "256GB" or null (exact storage to preselect in dropdown),
+    "grade": "A2" or null,
+    "color": "Black" or null
   },
   "suggestion": "Try also searching for..."
 }`;
@@ -336,6 +344,7 @@ RESPOND WITH VALID JSON ONLY (no markdown, no code blocks):
       suggestion: aiResponse.suggestion,
       products: formatProducts(matchedProducts),
       filters: aiResponse.filters,
+      preselect: aiResponse.preselect || null,
       processingTime
     });
 
@@ -410,7 +419,7 @@ router.get('/search/quick', async (req, res) => {
   }
 });
 
-// AI Chat endpoint - Smart chatbot powered by Gemini
+// AI Chat endpoint - Context-aware chatbot powered by Gemini
 router.post('/chat', async (req, res) => {
   const { message } = req.body;
 
@@ -419,71 +428,78 @@ router.post('/chat', async (req, res) => {
   }
 
   try {
-    const lower = message.toLowerCase();
+    // Fetch inventory for context
+    const products = await Product.find({ inStock: true });
 
-    // Check if it's a general greeting or off-topic
-    const isGreeting = /^(hi|hello|hey|sup|yo|good morning|good evening|greetings)/i.test(lower);
-    const isOffTopic = /(weather|sports|news|politics|temperature|movie|music|game|recipe)/i.test(lower);
+    // Build detailed inventory summary
+    let inventorySummary = '';
+    let totalUnits = 0;
+    products.forEach(p => {
+      const variations = p.variations?.map(v => {
+        totalUnits += v.stock;
+        return `${v.color} (${v.stock} units) $${v.price}`;
+      }).join(', ') || `${p.storage} $${p.wholesalePrice}`;
+      inventorySummary += `• ${p.model} ${p.storage} ${p.variations?.[0]?.grade || ''}: ${variations}\n`;
+    });
 
-    if (isOffTopic) {
-      return res.json({
-        success: true,
-        response: "I'm Cryzo Copilot, specialized in wholesale iPhone and iPad inquiries only. I can help you find stock, check prices, compare models, or answer questions about our inventory. What would you like to know?",
-        intent: 'off_topic'
-      });
-    }
+    // Use Pro model for better understanding
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' });
 
-    if (isGreeting && lower.length < 20) {
-      return res.json({
-        success: true,
-        response: "Hello! I'm Cryzo Copilot. I can help you with:\n\n- Finding specific iPhone/iPad models\n- Checking stock availability\n- Comparing prices across grades\n- Shipping and order questions\n\nWhat are you looking for today?",
-        intent: 'greeting'
-      });
-    }
+    const systemPrompt = `You are Cryzo Copilot, the AI assistant for Cryzo - a wholesale iPhone and iPad marketplace.
 
-    // For product-related queries, use Gemini
-    const products = await Product.find({ inStock: true }).limit(50);
+ABOUT CRYZO:
+- We sell wholesale refurbished and graded iPhones/iPads
+- Target customers: Phone resellers, repair shops, retailers
+- Minimum order: 10 units OR $2,500
+- Payment: Stripe (cards), Wire Transfer
+- Shipping: DHL/FedEx worldwide, 2-5 business days
+- Contact: sales@cryzo.co.in | +1 940-400-9316
+- Website: cryzo.me
 
-    const productSummary = products.map(p => {
-      const variations = p.variations?.slice(0, 2).map(v =>
-        `${v.storage} ${v.grade} $${v.price}`
-      ).join(', ') || `${p.storage} $${p.wholesalePrice}`;
-      return `${p.model}: ${variations}`;
-    }).join('\n');
+GRADING SYSTEM:
+- A2: Excellent condition, minimal signs of use
+- B1: Good condition, light scratches, may have low battery
+- B2: Fair condition, visible wear but fully functional
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+CURRENT INVENTORY (${totalUnits} total units):
+${inventorySummary}
 
-    const prompt = `You are Cryzo Copilot, a helpful assistant for a wholesale iPhone/iPad marketplace.
-
-INVENTORY:
-${productSummary}
-
-COMPANY INFO:
-- Email: sales@cryzo.co.in
-- Phone: +1 940-400-9316
-- Minimum order: 10 units or $2500
-- Shipping: DHL/FedEx worldwide
-- Payment: Stripe, Wire Transfer
+YOUR PERSONALITY:
+- Friendly, professional, helpful
+- You know EVERYTHING about Cryzo and our products
+- Give concise answers (under 100 words unless asked for details)
+- For greetings, be warm but brief - don't list capabilities unless asked
+- Only search/mention inventory when the user asks about products
+- If asked about competitors or unrelated topics, politely redirect to Cryzo
 
 USER MESSAGE: "${message}"
 
-Respond helpfully and concisely. If they ask about a product, include price and availability. If we don't have something, suggest alternatives. Keep responses under 100 words.`;
+Respond naturally as Cryzo Copilot:`;
 
-    const result = await model.generateContent(prompt);
+    const result = await model.generateContent(systemPrompt);
     const response = await result.response;
     const text = await response.text();
+
+    // Determine intent for analytics
+    const lower = message.toLowerCase();
+    let intent = 'general';
+    if (/^(hi|hello|hey|sup|yo|good|greetings|what's up)/i.test(lower)) intent = 'greeting';
+    else if (/(price|cost|how much|\$)/i.test(lower)) intent = 'pricing';
+    else if (/(stock|available|have|got|inventory)/i.test(lower)) intent = 'stock_check';
+    else if (/(ship|deliver|order|buy|purchase)/i.test(lower)) intent = 'order';
+    else if (/(iphone|ipad|phone|model)/i.test(lower)) intent = 'product_query';
 
     res.json({
       success: true,
       response: text,
-      intent: 'product_query'
+      intent
     });
 
   } catch (error) {
     console.error('Chat error:', error);
     res.json({
       success: true,
-      response: "I'm having trouble connecting right now. You can browse our inventory directly or contact us at sales@cryzo.co.in for assistance.",
+      response: "I'm having a moment! Feel free to browse our inventory or reach out to sales@cryzo.co.in. How can I help you today?",
       intent: 'error'
     });
   }

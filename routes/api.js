@@ -7,31 +7,23 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // Model selection - Gemini 3 Pro + Flash Hybrid
-// Pro for complex reasoning (chat, quotes, logic), Flash for speed (search)
+// Flash for most queries (fast), Pro only for complex reasoning
 const selectModel = (userQuery) => {
   const query = userQuery.toLowerCase();
 
-  // Complex queries need Pro model (better reasoning)
+  // Only use Pro for complex multi-step reasoning tasks
   if (
     query.includes("compare") ||
-    query.includes("best") ||
-    query.includes("recommend") ||
     query.includes("analyze") ||
-    query.includes("which") ||
-    query.includes("should i") ||
-    query.includes("difference") ||
+    query.includes("difference between") ||
     query.includes("why") ||
     query.includes("explain") ||
-    query.includes("help me") ||
-    query.includes("what do you think") ||
-    query.includes("price") ||
-    query.includes("quote") ||
-    query.split(' ').length > 10
+    query.includes("what do you think")
   ) {
     return { name: "gemini-3-pro-preview", type: "Pro" };
   }
 
-  // Default to Flash for speed
+  // Default to Flash for speed (handles most queries well)
   return { name: "gemini-3-flash-preview", type: "Flash" };
 };
 
@@ -114,11 +106,11 @@ router.get('/products/:id', async (req, res) => {
 
 // AI Search endpoint - THE MOAT (Powered by Gemini)
 router.post('/search', async (req, res) => {
-  const { query, image } = req.body;
+  const { query } = req.body;
   const startTime = Date.now();
 
-  if (!query && !image) {
-    return res.status(400).json({ error: 'Query or image is required' });
+  if (!query) {
+    return res.status(400).json({ error: 'Query is required' });
   }
 
   try {
@@ -173,10 +165,7 @@ router.post('/search', async (req, res) => {
     });
 
     // Select appropriate Gemini model
-    const selectedModel = image
-      ? { name: "gemini-2.0-flash", type: "Flash" }
-      : selectModel(query);
-
+    const selectedModel = selectModel(query);
     const model = genAI.getGenerativeModel({ model: selectedModel.name });
 
     console.log(`\n🤖 AI Search: "${query}" using Gemini ${selectedModel.type}`);
@@ -223,23 +212,7 @@ RESPOND WITH VALID JSON ONLY (no markdown, no code blocks):
   "suggestion": "Try also searching for..."
 }`;
 
-    let result;
-    if (image) {
-      // Handle image upload (price list screenshot)
-      const imagePart = {
-        inlineData: {
-          data: image.replace(/^data:image\/\w+;base64,/, ''),
-          mimeType: 'image/jpeg'
-        }
-      };
-      result = await model.generateContent([
-        systemPrompt + "\n\nThe user uploaded an image. If it's a price list, extract the products they're interested in.",
-        imagePart
-      ]);
-    } else {
-      result = await model.generateContent(systemPrompt);
-    }
-
+    const result = await model.generateContent(systemPrompt);
     const response = await result.response;
     const text = await response.text();
 

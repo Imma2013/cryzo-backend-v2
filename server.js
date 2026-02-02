@@ -11,14 +11,21 @@ const app = express();
 // Middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000'
+  origin: [
+    process.env.FRONTEND_URL || 'http://localhost:3000',
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://localhost:5175',
+    'http://localhost:5176'
+  ],
+  credentials: true
 }));
 app.use(helmet());
 
-// Rate limiting
+// Rate limiting - more generous for wholesale app
 const limiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 10, // 10 requests per minute
+  max: 100, // 100 requests per minute
   standardHeaders: true,
   legacyHeaders: false,
 });

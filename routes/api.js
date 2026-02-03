@@ -61,8 +61,8 @@ const simplePatterns = [
 
 // Model selection - Use Gemini 3.0 Flash for everything (speed + quality)
 const selectModel = (userQuery) => {
-  // Use Gemini 3.0 Flash for speed and great understanding
-  return { name: "gemini-3.0-flash", type: "Flash" };
+  // Use Gemini 3.0 Flash Preview for speed and great understanding
+  return { name: "gemini-3-flash-preview", type: "Flash" };
 };
 
 // Contact endpoint
@@ -281,10 +281,10 @@ router.post('/search', async (req, res) => {
     console.log(`📦 Inventory: ${flatInventory.length} variations from ${products.length} products`);
 
     // Build the prompt for Gemini
-    const systemPrompt = `You are Cryzo AI, a wholesale phone marketplace search assistant.
+    const systemPrompt = `You are Cryzo AI, a phone marketplace search assistant.
 
 YOUR ROLE:
-- Help wholesalers find iPhones and iPads from our inventory
+- Help customers find iPhones and iPads from our inventory
 - Parse natural language queries into structured filters
 - Only return products that exist in our database
 
@@ -551,23 +551,22 @@ router.post('/chat', async (req, res) => {
       inventorySummary += `• ${p.model} ${p.storage} ${p.variations?.[0]?.grade || ''}: ${variations}\n`;
     });
 
-    // Use Gemini 3.0 Flash for speed and great understanding
-    const model = genAI.getGenerativeModel({ model: 'gemini-3.0-flash' });
+    // Use Gemini 3.0 Flash Preview for speed and great understanding
+    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
 
     const systemPrompt = `You are Cryzo Copilot, the AI assistant for Cryzo - a premium iPhone and iPad marketplace.
 
 ABOUT CRYZO:
-- We sell refurbished and graded iPhones/iPads from USA
+- We sell refurbished and graded iPhones/iPads
 - All devices ship from USA with fast worldwide delivery
-- Target customers: Phone resellers, repair shops, retailers, individuals
-- Payment: Stripe (cards), Wire Transfer
+- Payment: Secure checkout via Stripe (all major cards)
 - Shipping: DHL/FedEx worldwide, 2-5 business days
 - Contact: sales@cryzo.co.in | +1 940-400-9316
 - Website: cryzo.me
 
 GRADING SYSTEM:
 - A2: Excellent condition, minimal signs of use
-- B1: Good condition, light scratches, may have low battery
+- B1: Good condition, light scratches
 - B2: Fair condition, visible wear but fully functional
 
 CURRENT INVENTORY (${totalUnits} total units):

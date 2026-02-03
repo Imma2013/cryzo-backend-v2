@@ -6,25 +6,63 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 // Initialize Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Model selection - Gemini 3 Pro + Flash Hybrid
-// Flash for most queries (fast), Pro only for complex reasoning
+// ============================================
+// RESPONSE CACHE - For faster repeated queries
+// ============================================
+const searchCache = new Map();
+const chatCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// ============================================
+// SIMPLE PATTERNS - Skip AI for basic queries
+// All products are USA origin only
+// ============================================
+const simplePatterns = [
+  // iPhone model search
+  {
+    regex: /iphone\s*(\d+)(?:\s*(pro|pro\s*max|plus|mini))?/i,
+    filter: (m) => ({
+      model: new RegExp(`iPhone ${m[1]}${m[2] ? ' ' + m[2].replace(/\s+/g, ' ').trim() : ''}`, 'i'),
+      'variations.origin': 'US'
+    }),
+    message: (m) => `Showing iPhone ${m[1]}${m[2] ? ' ' + m[2] : ''} models`
+  },
+  // iPad search
+  {
+    regex: /ipad\s*(pro|air|mini)?/i,
+    filter: (m) => ({
+      category: 'iPad',
+      'variations.origin': 'US'
+    }),
+    message: (m) => `Showing iPad${m[1] ? ' ' + m[1] : ''} models`
+  },
+  // Storage search
+  {
+    regex: /(\d+)\s*gb/i,
+    filter: (m) => ({
+      'variations.storage': `${m[1]}GB`,
+      'variations.origin': 'US'
+    }),
+    message: (m) => `Showing ${m[1]}GB devices`
+  },
+  // Grade search
+  {
+    regex: /(grade\s*)?(a2?|b[12]?|refurb)/i,
+    filter: (m) => {
+      const grade = m[2].toUpperCase();
+      return {
+        'variations.grade': new RegExp(grade, 'i'),
+        'variations.origin': 'US'
+      };
+    },
+    message: (m) => `Showing Grade ${m[2].toUpperCase()} devices`
+  },
+];
+
+// Model selection - Use Gemini 3.0 Flash for everything (speed + quality)
 const selectModel = (userQuery) => {
-  const query = userQuery.toLowerCase();
-
-  // Only use Pro for complex multi-step reasoning tasks
-  if (
-    query.includes("compare") ||
-    query.includes("analyze") ||
-    query.includes("difference between") ||
-    query.includes("why") ||
-    query.includes("explain") ||
-    query.includes("what do you think")
-  ) {
-    return { name: "gemini-3-pro-preview", type: "Pro" };
-  }
-
-  // Default to Flash for speed (handles most queries well)
-  return { name: "gemini-3-flash-preview", type: "Flash" };
+  // Use Gemini 3.0 Flash for speed and great understanding
+  return { name: "gemini-3.0-flash", type: "Flash" };
 };
 
 // Contact endpoint
@@ -35,10 +73,13 @@ router.get('/contact', (req, res) => {
   });
 });
 
-// Get all products
+// Get all products - USA origin only
 router.get('/products', async (req, res) => {
   try {
-    const products = await Product.find({ inStock: true }).limit(50);
+    const products = await Product.find({
+      inStock: true,
+      'variations.origin': 'US'
+    }).limit(50);
 
     // Flatten products with variations for frontend
     const flattenedProducts = [];
@@ -113,9 +154,72 @@ router.post('/search', async (req, res) => {
     return res.status(400).json({ error: 'Query is required' });
   }
 
+  // ============================================
+  // CHECK CACHE FIRST - Instant response
+  // ============================================
+  const cacheKey = query.toLowerCase().trim();
+  const cached = searchCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    console.log('🚀 Cache hit for:', query);
+    return res.json({ ...cached.data, cached: true, processingTime: Date.now() - startTime });
+  }
+
   try {
-    // Fetch all products from database
-    const products = await Product.find({ inStock: true });
+    // Fetch all products from database - USA origin only
+    const products = await Product.find({
+      inStock: true,
+      'variations.origin': 'US'
+    });
+
+    // ============================================
+    // DETECT COMPLEX QUERIES - Route to AI
+    // Complex = multiple products, comparisons, "and", "or", price ranges, recommendations
+    // ============================================
+    const isComplexQuery = (q) => {
+      const lower = q.toLowerCase();
+      // Multiple products mentioned (e.g., "iPhone 13 and iPhone 15")
+      if (/iphone\s*\d+.*(?:and|&|,|or).*iphone\s*\d+/i.test(q)) return true;
+      // Comparison words
+      if (/\b(compare|vs|versus|difference|better|best|recommend|which)\b/i.test(q)) return true;
+      // Complex price queries
+      if (/\b(between|under|over|cheaper|expensive|budget|affordable)\b.*\$?\d+/i.test(q)) return true;
+      // Multiple criteria combined
+      if ((lower.match(/\b(and|with|plus)\b/g) || []).length >= 2) return true;
+      // Questions
+      if (/\?$/.test(q.trim()) || /^(what|which|how|can|do you|show me both)/i.test(q)) return true;
+      return false;
+    };
+
+    // If complex query, skip to AI processing
+    const useAI = isComplexQuery(query);
+
+    // ============================================
+    // TRY SIMPLE PATTERNS FIRST - Skip AI (only for simple queries)
+    // ============================================
+    if (!useAI) for (const pattern of simplePatterns) {
+      const match = query.match(pattern.regex);
+      if (match) {
+        const filterQuery = { inStock: true, ...pattern.filter(match) };
+        const matchedProducts = await Product.find(filterQuery).limit(50);
+
+        if (matchedProducts.length > 0) {
+          const responseData = {
+            success: true,
+            query,
+            model: 'quick',
+            message: pattern.message(match),
+            products: formatProducts(matchedProducts),
+            processingTime: Date.now() - startTime
+          };
+
+          // Cache the response
+          searchCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
+
+          console.log(`⚡ Quick search: "${query}" -> ${matchedProducts.length} results in ${Date.now() - startTime}ms`);
+          return res.json(responseData);
+        }
+      }
+    }
 
     if (products.length === 0) {
       return res.json({
@@ -126,6 +230,11 @@ router.post('/search', async (req, res) => {
         products: [],
         processingTime: Date.now() - startTime
       });
+    }
+
+    // Log if using AI for complex query
+    if (useAI) {
+      console.log(`🧠 Complex query detected: "${query}" - routing to AI`);
     }
 
     // Flatten products for AI processing
@@ -313,7 +422,7 @@ RESPOND WITH VALID JSON ONLY (no markdown, no code blocks):
     const processingTime = Date.now() - startTime;
     console.log(`✅ Found ${matchedProducts.length} products in ${processingTime}ms`);
 
-    res.json({
+    const responseData = {
       success: true,
       query,
       model: selectedModel.type,
@@ -324,14 +433,22 @@ RESPOND WITH VALID JSON ONLY (no markdown, no code blocks):
       filters: aiResponse.filters,
       preselect: aiResponse.preselect || null,
       processingTime
-    });
+    };
+
+    // Cache the response
+    searchCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
+
+    res.json(responseData);
 
   } catch (error) {
     console.error('❌ AI Search Error:', error);
 
-    // Graceful fallback - basic search
+    // Graceful fallback - basic search (USA only)
     try {
-      const products = await Product.find({ inStock: true });
+      const products = await Product.find({
+        inStock: true,
+        'variations.origin': 'US'
+      });
       const searchTerms = query.toLowerCase().split(' ').filter(t => t.length > 2);
       const filtered = products.filter(p => {
         const searchText = `${p.name} ${p.model} ${p.category}`.toLowerCase();
@@ -380,12 +497,15 @@ function formatProducts(products) {
   });
 }
 
-// Quick search (no AI, just filters)
+// Quick search (no AI, just filters) - USA only
 router.get('/search/quick', async (req, res) => {
-  const { category, model, grade, storage, origin, minPrice, maxPrice } = req.query;
+  const { category, model, grade, storage, minPrice, maxPrice } = req.query;
 
   try {
-    const query = { inStock: true };
+    const query = {
+      inStock: true,
+      'variations.origin': 'US'
+    };
 
     if (category) query.category = category;
     if (model) query.model = new RegExp(model, 'i');
@@ -405,9 +525,20 @@ router.post('/chat', async (req, res) => {
     return res.status(400).json({ error: 'Message is required' });
   }
 
+  // Check cache first
+  const cacheKey = message.toLowerCase().trim();
+  const cached = chatCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    console.log('🚀 Chat cache hit for:', message);
+    return res.json(cached.data);
+  }
+
   try {
-    // Fetch inventory for context
-    const products = await Product.find({ inStock: true });
+    // Fetch inventory for context - USA origin only
+    const products = await Product.find({
+      inStock: true,
+      'variations.origin': 'US'
+    });
 
     // Build detailed inventory summary
     let inventorySummary = '';
@@ -420,15 +551,15 @@ router.post('/chat', async (req, res) => {
       inventorySummary += `• ${p.model} ${p.storage} ${p.variations?.[0]?.grade || ''}: ${variations}\n`;
     });
 
-    // Use Pro model for better understanding (Gemini 3 Pro)
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-pro-preview' });
+    // Use Gemini 3.0 Flash for speed and great understanding
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.0-flash' });
 
-    const systemPrompt = `You are Cryzo Copilot, the AI assistant for Cryzo - a wholesale iPhone and iPad marketplace.
+    const systemPrompt = `You are Cryzo Copilot, the AI assistant for Cryzo - a premium iPhone and iPad marketplace.
 
 ABOUT CRYZO:
-- We sell wholesale refurbished and graded iPhones/iPads
-- Target customers: Phone resellers, repair shops, retailers
-- Minimum order: 10 units OR $2,500
+- We sell refurbished and graded iPhones/iPads from USA
+- All devices ship from USA with fast worldwide delivery
+- Target customers: Phone resellers, repair shops, retailers, individuals
 - Payment: Stripe (cards), Wire Transfer
 - Shipping: DHL/FedEx worldwide, 2-5 business days
 - Contact: sales@cryzo.co.in | +1 940-400-9316
@@ -467,11 +598,16 @@ Respond naturally as Cryzo Copilot:`;
     else if (/(ship|deliver|order|buy|purchase)/i.test(lower)) intent = 'order';
     else if (/(iphone|ipad|phone|model)/i.test(lower)) intent = 'product_query';
 
-    res.json({
+    const responseData = {
       success: true,
       response: text,
       intent
-    });
+    };
+
+    // Cache the response
+    chatCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
+
+    res.json(responseData);
 
   } catch (error) {
     console.error('Chat error:', error);

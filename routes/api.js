@@ -18,6 +18,23 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 // All products are USA origin only
 // ============================================
 const simplePatterns = [
+  // Multiple iPhone models (e.g., "iPhone 14 and 15", "iPhone 13, 14, 15")
+  {
+    regex: /iphone\s*(\d+)(?:\s*(?:and|&|,|or)\s*(?:iphone\s*)?(\d+))+/i,
+    filter: (m, query) => {
+      // Extract all numbers from the query
+      const numbers = query.match(/\d+/g) || [];
+      const modelRegex = numbers.map(n => `iPhone ${n}`).join('|');
+      return {
+        model: new RegExp(modelRegex, 'i'),
+        'variations.origin': 'US'
+      };
+    },
+    message: (m, query) => {
+      const numbers = query.match(/\d+/g) || [];
+      return `Showing iPhone ${numbers.join(', ')} models`;
+    }
+  },
   // iPhone model search
   {
     regex: /iphone\s*(\d+)(?:\s*(pro|pro\s*max|plus|mini))?/i,
@@ -45,7 +62,23 @@ const simplePatterns = [
     }),
     message: (m) => `Showing ${m[1]}GB devices`
   },
-  // Grade search
+  // Condition search (Like New, Good)
+  {
+    regex: /(like\s*new|good|brand\s*new)/i,
+    filter: (m) => {
+      const condition = m[1].toLowerCase();
+      let gradeRegex;
+      if (condition.includes('brand')) gradeRegex = /Brand New/i;
+      else if (condition.includes('like')) gradeRegex = /A[12]|Refurb A/i;
+      else gradeRegex = /B[12]|Refurb [BC]/i;
+      return {
+        'variations.grade': gradeRegex,
+        'variations.origin': 'US'
+      };
+    },
+    message: (m) => `Showing ${m[1]} condition devices`
+  },
+  // Grade search (legacy support)
   {
     regex: /(grade\s*)?(a2?|b[12]?|refurb)/i,
     filter: (m) => {
@@ -172,34 +205,13 @@ router.post('/search', async (req, res) => {
     });
 
     // ============================================
-    // DETECT COMPLEX QUERIES - Route to AI
-    // Complex = multiple products, comparisons, "and", "or", price ranges, recommendations
+    // TRY SIMPLE PATTERNS FIRST - Skip AI for common queries
+    // This runs BEFORE complexity check to maximize speed
     // ============================================
-    const isComplexQuery = (q) => {
-      const lower = q.toLowerCase();
-      // Multiple products mentioned (e.g., "iPhone 13 and iPhone 15")
-      if (/iphone\s*\d+.*(?:and|&|,|or).*iphone\s*\d+/i.test(q)) return true;
-      // Comparison words
-      if (/\b(compare|vs|versus|difference|better|best|recommend|which)\b/i.test(q)) return true;
-      // Complex price queries
-      if (/\b(between|under|over|cheaper|expensive|budget|affordable)\b.*\$?\d+/i.test(q)) return true;
-      // Multiple criteria combined
-      if ((lower.match(/\b(and|with|plus)\b/g) || []).length >= 2) return true;
-      // Questions
-      if (/\?$/.test(q.trim()) || /^(what|which|how|can|do you|show me both)/i.test(q)) return true;
-      return false;
-    };
-
-    // If complex query, skip to AI processing
-    const useAI = isComplexQuery(query);
-
-    // ============================================
-    // TRY SIMPLE PATTERNS FIRST - Skip AI (only for simple queries)
-    // ============================================
-    if (!useAI) for (const pattern of simplePatterns) {
+    for (const pattern of simplePatterns) {
       const match = query.match(pattern.regex);
       if (match) {
-        const filterQuery = { inStock: true, ...pattern.filter(match) };
+        const filterQuery = { inStock: true, ...pattern.filter(match, query) };
         const matchedProducts = await Product.find(filterQuery).limit(50);
 
         if (matchedProducts.length > 0) {
@@ -207,7 +219,7 @@ router.post('/search', async (req, res) => {
             success: true,
             query,
             model: 'quick',
-            message: pattern.message(match),
+            message: pattern.message(match, query),
             products: formatProducts(matchedProducts),
             processingTime: Date.now() - startTime
           };
@@ -220,6 +232,22 @@ router.post('/search', async (req, res) => {
         }
       }
     }
+
+    // ============================================
+    // DETECT COMPLEX QUERIES - Route to AI
+    // Only reaches here if no simple pattern matched
+    // ============================================
+    const isComplexQuery = (q) => {
+      // Comparison words
+      if (/\b(compare|vs|versus|difference|better|best|recommend|which)\b/i.test(q)) return true;
+      // Complex price queries
+      if (/\b(between|under|over|cheaper|expensive|budget|affordable)\b.*\$?\d+/i.test(q)) return true;
+      // Questions
+      if (/\?$/.test(q.trim()) || /^(what|how|can|do you)/i.test(q)) return true;
+      return false;
+    };
+
+    const useAI = isComplexQuery(query);
 
     if (products.length === 0) {
       return res.json({
@@ -237,88 +265,37 @@ router.post('/search', async (req, res) => {
       console.log(`🧠 Complex query detected: "${query}" - routing to AI`);
     }
 
-    // Flatten products for AI processing
-    const flatInventory = [];
-    products.forEach(p => {
-      if (p.variations && p.variations.length > 0) {
-        p.variations.forEach(v => {
-          flatInventory.push({
-            productId: p._id.toString(),
-            name: p.name,
-            model: p.model,
-            category: p.category,
-            storage: v.storage,
-            grade: v.grade,
-            color: v.color,
-            wholesalePrice: v.price,
-            retailPrice: p.price,
-            stock: v.stock,
-            origin: v.origin
-          });
-        });
-      } else {
-        flatInventory.push({
-          productId: p._id.toString(),
-          name: p.name,
-          model: p.model,
-          category: p.category,
-          storage: p.storage,
-          grade: 'Brand New',
-          color: 'Black',
-          wholesalePrice: p.wholesalePrice,
-          retailPrice: p.price,
-          stock: 100,
-          origin: 'US'
-        });
-      }
-    });
+    // Build compact inventory summary for AI (much faster than full inventory)
+    const uniqueModels = [...new Set(products.map(p => p.model))];
+    const uniqueStorages = [...new Set(products.flatMap(p => p.variations?.map(v => v.storage) || [p.storage]))];
+    const uniqueGrades = [...new Set(products.flatMap(p => p.variations?.map(v => v.grade) || ['Brand New']))];
+    const priceRange = products.reduce((acc, p) => {
+      const prices = p.variations?.map(v => v.price) || [p.wholesalePrice];
+      return { min: Math.min(acc.min, ...prices), max: Math.max(acc.max, ...prices) };
+    }, { min: Infinity, max: 0 });
+
+    const inventorySummary = `Models: ${uniqueModels.join(', ')}
+Storages: ${uniqueStorages.join(', ')}
+Conditions: ${uniqueGrades.join(', ')}
+Price range: $${priceRange.min} - $${priceRange.max}`;
 
     // Select appropriate Gemini model
     const selectedModel = selectModel(query);
     const model = genAI.getGenerativeModel({ model: selectedModel.name });
 
     console.log(`\n🤖 AI Search: "${query}" using Gemini ${selectedModel.type}`);
-    console.log(`📦 Inventory: ${flatInventory.length} variations from ${products.length} products`);
+    console.log(`📦 Inventory: ${products.length} products`);
 
-    // Build the prompt for Gemini
-    const systemPrompt = `You are Cryzo AI, a phone marketplace search assistant.
+    // Build compact prompt for Gemini (smaller = faster)
+    const systemPrompt = `You are Cryzo AI search. Parse the user query into filters.
 
-YOUR ROLE:
-- Help customers find iPhones and iPads from our inventory
-- Parse natural language queries into structured filters
-- Only return products that exist in our database
+AVAILABLE INVENTORY:
+${inventorySummary}
 
-INVENTORY DATABASE (${flatInventory.length} items):
-${JSON.stringify(flatInventory, null, 2)}
+USER: "${query}"
 
-USER QUERY: "${query}"
-
-INSTRUCTIONS:
-1. Understand what the user is looking for
-2. Find ALL matching products from the inventory above
-3. Consider: model names, storage, grades (Brand New, Refurb A/B/C), colors, origins (US, HK, JP, EU, AU), prices
-
-RESPOND WITH VALID JSON ONLY (no markdown, no code blocks):
-{
-  "intent": "search",
-  "message": "Found X products matching your query...",
-  "matchingProductIds": ["id1", "id2"],
-  "filters": {
-    "category": "iPhone" or "iPad" or null,
-    "models": ["iPhone 15", "iPhone 14"] or null,
-    "storage": "256GB" or null (if user specified a storage size),
-    "grades": ["A2", "B1"] or null,
-    "colors": ["Black", "Blue"] or null,
-    "origins": ["US", "JP"] or null,
-    "maxPrice": number or null,
-    "minPrice": number or null
-  },
-  "preselect": {
-    "storage": "256GB" or null (exact storage to preselect in dropdown),
-    "grade": "A2" or null,
-    "color": "Black" or null
-  },
-  "suggestion": "Try also searching for..."
+Return JSON only:
+{"message":"Brief response","filters":{"models":["iPhone 15"],"storage":"256GB","grades":["A2"],"maxPrice":800},"suggestion":"tip"}
 }`;
 
     const result = await model.generateContent(systemPrompt);

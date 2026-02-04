@@ -5,15 +5,7 @@ require('dotenv').config();
 const mongoose = require('mongoose');
 const Product = require('../models/Product');
 
-const MONGO_URI = process.env.MONGO_URI;
-
-// Helper to map grades
-const mapGrade = (grade) => {
-  if (grade.includes('Grade 1')) return 'Like New';
-  if (grade.includes('Grade 2')) return 'Like New';
-  if (grade.includes('Grade 3')) return 'Good';
-  return 'Good';
-};
+const MONGO_URI = process.env.MONGODB_URI;
 
 // 10% markup on prices
 const markup = (price) => Math.round(price * 1.10);
@@ -23,6 +15,9 @@ const newProducts = [
   {
     name: 'iPhone 16 Pro Max',
     model: 'iPhone 16 Pro Max',
+    storage: '256GB',
+    price: markup(808),
+    wholesalePrice: 808,
     category: 'iPhone',
     inStock: true,
     variations: [
@@ -69,6 +64,9 @@ const newProducts = [
   {
     name: 'iPhone 16e',
     model: 'iPhone 16e',
+    storage: '128GB',
+    price: markup(358),
+    wholesalePrice: 358,
     category: 'iPhone',
     inStock: true,
     variations: [
@@ -80,6 +78,9 @@ const newProducts = [
   {
     name: 'iPhone 17',
     model: 'iPhone 17',
+    storage: '256GB',
+    price: markup(759),
+    wholesalePrice: 759,
     category: 'iPhone',
     inStock: true,
     variations: [

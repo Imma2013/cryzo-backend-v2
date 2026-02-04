@@ -13,86 +13,7 @@ const searchCache = new Map();
 const chatCache = new Map();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-// ============================================
-// SIMPLE PATTERNS - Skip AI for basic queries
-// All products are USA origin only
-// ============================================
-const simplePatterns = [
-  // Multiple iPhone models (e.g., "iPhone 14 and 15", "iPhone 13, 14, 15")
-  {
-    regex: /iphone\s*(\d+)(?:\s*(?:and|&|,|or)\s*(?:iphone\s*)?(\d+))+/i,
-    filter: (m, query) => {
-      // Extract all numbers from the query
-      const numbers = query.match(/\d+/g) || [];
-      const modelRegex = numbers.map(n => `iPhone ${n}`).join('|');
-      return {
-        model: new RegExp(modelRegex, 'i'),
-        'variations.origin': 'US'
-      };
-    },
-    message: (m, query) => {
-      const numbers = query.match(/\d+/g) || [];
-      return `Showing iPhone ${numbers.join(', ')} models`;
-    }
-  },
-  // iPhone model search
-  {
-    regex: /iphone\s*(\d+)(?:\s*(pro|pro\s*max|plus|mini))?/i,
-    filter: (m) => ({
-      model: new RegExp(`iPhone ${m[1]}${m[2] ? ' ' + m[2].replace(/\s+/g, ' ').trim() : ''}`, 'i'),
-      'variations.origin': 'US'
-    }),
-    message: (m) => `Showing iPhone ${m[1]}${m[2] ? ' ' + m[2] : ''} models`
-  },
-  // iPad search
-  {
-    regex: /ipad\s*(pro|air|mini)?/i,
-    filter: (m) => ({
-      category: 'iPad',
-      'variations.origin': 'US'
-    }),
-    message: (m) => `Showing iPad${m[1] ? ' ' + m[1] : ''} models`
-  },
-  // Storage search
-  {
-    regex: /(\d+)\s*gb/i,
-    filter: (m) => ({
-      'variations.storage': `${m[1]}GB`,
-      'variations.origin': 'US'
-    }),
-    message: (m) => `Showing ${m[1]}GB devices`
-  },
-  // Condition search (Like New, Good)
-  {
-    regex: /(like\s*new|good|brand\s*new)/i,
-    filter: (m) => {
-      const condition = m[1].toLowerCase();
-      let gradeRegex;
-      if (condition.includes('brand')) gradeRegex = /Brand New/i;
-      else if (condition.includes('like')) gradeRegex = /A[12]|Refurb A/i;
-      else gradeRegex = /B[12]|Refurb [BC]/i;
-      return {
-        'variations.grade': gradeRegex,
-        'variations.origin': 'US'
-      };
-    },
-    message: (m) => `Showing ${m[1]} condition devices`
-  },
-  // Grade search (legacy support)
-  {
-    regex: /(grade\s*)?(a2?|b[12]?|refurb)/i,
-    filter: (m) => {
-      const grade = m[2].toUpperCase();
-      return {
-        'variations.grade': new RegExp(grade, 'i'),
-        'variations.origin': 'US'
-      };
-    },
-    message: (m) => `Showing Grade ${m[2].toUpperCase()} devices`
-  },
-];
-
-// Model selection - Use Gemini 3.0 Flash for everything (speed + quality)
+// Model selection - Use Gemini Flash for everything (speed + quality)
 const selectModel = (userQuery) => {
   // Use Gemini 3.0 Flash Preview for speed and great understanding
   return { name: "gemini-3-flash-preview", type: "Flash" };
@@ -204,61 +125,6 @@ router.post('/search', async (req, res) => {
       'variations.origin': 'US'
     });
 
-    // ============================================
-    // DETECT COMPLEX QUERIES FIRST - Route to AI
-    // Check this BEFORE simple patterns to catch multi-model queries
-    // ============================================
-    const isComplexQuery = (q) => {
-      // ANY query with "and" or "or" between product terms - route to AI
-      // This catches: "iPad Air and iPad 9th gen", "iPhone 13 and 15", etc.
-      if (/\b(and|or|&)\b/i.test(q) && /(iphone|ipad)/i.test(q)) return true;
-      // Comparison words
-      if (/\b(compare|vs|versus|difference|better|best|recommend|which)\b/i.test(q)) return true;
-      // Complex price queries
-      if (/\b(between|under|over|cheaper|expensive|budget|affordable)\b.*\$?\d+/i.test(q)) return true;
-      // Questions
-      if (/\?$/.test(q.trim()) || /^(what|how|can|do you)/i.test(q)) return true;
-      return false;
-    };
-
-    const useAI = isComplexQuery(query);
-
-    // If complex query detected, skip simple patterns and go straight to AI
-    if (useAI) {
-      console.log(`🧠 Complex query detected: "${query}" - skipping simple patterns, routing to AI`);
-    }
-
-    // ============================================
-    // TRY SIMPLE PATTERNS - Skip AI for basic queries
-    // Only runs if NOT a complex query
-    // ============================================
-    if (!useAI) {
-      for (const pattern of simplePatterns) {
-        const match = query.match(pattern.regex);
-        if (match) {
-          const filterQuery = { inStock: true, ...pattern.filter(match, query) };
-          const matchedProducts = await Product.find(filterQuery).limit(50);
-
-          if (matchedProducts.length > 0) {
-            const responseData = {
-              success: true,
-              query,
-              model: 'quick',
-              message: pattern.message(match, query),
-              products: formatProducts(matchedProducts),
-              processingTime: Date.now() - startTime
-            };
-
-            // Cache the response
-            searchCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
-
-            console.log(`⚡ Quick search: "${query}" -> ${matchedProducts.length} results in ${Date.now() - startTime}ms`);
-            return res.json(responseData);
-          }
-        }
-      }
-    }
-
     if (products.length === 0) {
       return res.json({
         success: true,
@@ -270,10 +136,10 @@ router.post('/search', async (req, res) => {
       });
     }
 
-    // Log if using AI for complex query
-    if (useAI) {
-      console.log(`🧠 Complex query detected: "${query}" - routing to AI`);
-    }
+    // ============================================
+    // ALL SEARCHES GO TO AI (Gemini Flash)
+    // ============================================
+    console.log(`🤖 AI Search: "${query}"`);
 
     // Build compact inventory summary for AI (much faster than full inventory)
     const uniqueModels = [...new Set(products.map(p => p.model))];

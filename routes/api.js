@@ -15,8 +15,8 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 // Model selection - Use Gemini Flash for everything (speed + quality)
 const selectModel = (userQuery) => {
-  // Use Gemini 3.0 Flash Preview for speed and great understanding
-  return { name: "gemini-3-flash-preview", type: "Flash" };
+  // Use Gemini 2.0 Flash for speed
+  return { name: "gemini-2.0-flash", type: "Flash" };
 };
 
 // Contact endpoint

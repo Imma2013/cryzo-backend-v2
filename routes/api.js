@@ -209,9 +209,9 @@ router.post('/search', async (req, res) => {
     // Check this BEFORE simple patterns to catch multi-model queries
     // ============================================
     const isComplexQuery = (q) => {
-      // Multi-model queries (e.g., "iPhone 13 and 15", "iPhone 14 mini and iPhone 15 Pro Max")
-      if (/iphone.+\b(and|or|&)\b.+iphone/i.test(q)) return true;
-      if (/iphone\s*\d+.+\b(and|or|&)\b.+\d+/i.test(q)) return true;
+      // ANY query with "and" or "or" between product terms - route to AI
+      // This catches: "iPad Air and iPad 9th gen", "iPhone 13 and 15", etc.
+      if (/\b(and|or|&)\b/i.test(q) && /(iphone|ipad)/i.test(q)) return true;
       // Comparison words
       if (/\b(compare|vs|versus|difference|better|best|recommend|which)\b/i.test(q)) return true;
       // Complex price queries

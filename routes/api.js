@@ -404,8 +404,8 @@ router.post('/chat', async (req, res) => {
       inventorySummary += `• ${p.model} ${p.storage} ${p.variations?.[0]?.grade || ''}: ${variations}\n`;
     });
 
-    // Use Gemini 3.0 Flash Preview for speed and great understanding
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
+    // Use Gemini 2.0 Flash for speed
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
     const systemPrompt = `You are Cryzo Copilot, the AI assistant for Cryzo - a premium iPhone and iPad marketplace.
 

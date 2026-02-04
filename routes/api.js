@@ -205,39 +205,13 @@ router.post('/search', async (req, res) => {
     });
 
     // ============================================
-    // TRY SIMPLE PATTERNS FIRST - Skip AI for common queries
-    // This runs BEFORE complexity check to maximize speed
-    // ============================================
-    for (const pattern of simplePatterns) {
-      const match = query.match(pattern.regex);
-      if (match) {
-        const filterQuery = { inStock: true, ...pattern.filter(match, query) };
-        const matchedProducts = await Product.find(filterQuery).limit(50);
-
-        if (matchedProducts.length > 0) {
-          const responseData = {
-            success: true,
-            query,
-            model: 'quick',
-            message: pattern.message(match, query),
-            products: formatProducts(matchedProducts),
-            processingTime: Date.now() - startTime
-          };
-
-          // Cache the response
-          searchCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
-
-          console.log(`⚡ Quick search: "${query}" -> ${matchedProducts.length} results in ${Date.now() - startTime}ms`);
-          return res.json(responseData);
-        }
-      }
-    }
-
-    // ============================================
-    // DETECT COMPLEX QUERIES - Route to AI
-    // Only reaches here if no simple pattern matched
+    // DETECT COMPLEX QUERIES FIRST - Route to AI
+    // Check this BEFORE simple patterns to catch multi-model queries
     // ============================================
     const isComplexQuery = (q) => {
+      // Multi-model queries (e.g., "iPhone 13 and 15", "iPhone 14 mini and iPhone 15 Pro Max")
+      if (/iphone.+\b(and|or|&)\b.+iphone/i.test(q)) return true;
+      if (/iphone\s*\d+.+\b(and|or|&)\b.+\d+/i.test(q)) return true;
       // Comparison words
       if (/\b(compare|vs|versus|difference|better|best|recommend|which)\b/i.test(q)) return true;
       // Complex price queries
@@ -248,6 +222,42 @@ router.post('/search', async (req, res) => {
     };
 
     const useAI = isComplexQuery(query);
+
+    // If complex query detected, skip simple patterns and go straight to AI
+    if (useAI) {
+      console.log(`🧠 Complex query detected: "${query}" - skipping simple patterns, routing to AI`);
+    }
+
+    // ============================================
+    // TRY SIMPLE PATTERNS - Skip AI for basic queries
+    // Only runs if NOT a complex query
+    // ============================================
+    if (!useAI) {
+      for (const pattern of simplePatterns) {
+        const match = query.match(pattern.regex);
+        if (match) {
+          const filterQuery = { inStock: true, ...pattern.filter(match, query) };
+          const matchedProducts = await Product.find(filterQuery).limit(50);
+
+          if (matchedProducts.length > 0) {
+            const responseData = {
+              success: true,
+              query,
+              model: 'quick',
+              message: pattern.message(match, query),
+              products: formatProducts(matchedProducts),
+              processingTime: Date.now() - startTime
+            };
+
+            // Cache the response
+            searchCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
+
+            console.log(`⚡ Quick search: "${query}" -> ${matchedProducts.length} results in ${Date.now() - startTime}ms`);
+            return res.json(responseData);
+          }
+        }
+      }
+    }
 
     if (products.length === 0) {
       return res.json({

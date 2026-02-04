@@ -1,5 +1,5 @@
 import express from 'express';
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import Product from '../models/Product.js';
 
 const router = express.Router();
@@ -10,33 +10,30 @@ router.post('/', async (req, res) => {
     const { query } = req.body;
 
     if (!query || query.trim().length === 0) {
-      return res.status(400).json({ 
-        error: 'Search query is required' 
+      return res.status(400).json({
+        error: 'Search query is required'
       });
     }
 
-    // Initialize Claude API inside handler
-    if (!process.env.CLAUDE_API_KEY) {
-      console.error('❌ CLAUDE_API_KEY not found in environment');
-      return res.status(500).json({ 
+    // Initialize Gemini API
+    if (!process.env.GEMINI_API_KEY) {
+      console.error('❌ GEMINI_API_KEY not found in environment');
+      return res.status(500).json({
+        success: false,
+        model: 'fallback',
         error: 'API key not configured',
-        hint: 'Set CLAUDE_API_KEY in .env file'
+        hint: 'Set GEMINI_API_KEY in .env file',
+        products: []
       });
     }
 
-    const anthropic = new Anthropic({
-      apiKey: process.env.CLAUDE_API_KEY,
-    });
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
     console.log(`🔍 Search query: "${query}"`);
 
-    // Step 1: Use Claude to parse the natural language query
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      messages: [{
-        role: 'user',
-        content: `You are a search query parser for a wholesale phone marketplace.
+    // Step 1: Use Gemini to parse the natural language query
+    const prompt = `You are a search query parser for a wholesale phone marketplace.
 
 Parse this search query and extract structured parameters: "${query}"
 
@@ -45,7 +42,7 @@ Return ONLY a valid JSON object (no markdown, no explanation) with these fields:
   "brand": "Apple" or "Samsung" or null,
   "model": "iPhone 14 Pro" or "Galaxy S23" or null (include model number/name),
   "storage": "128GB" or "256GB" or null,
-  "grade": "A" or "B" or "C" or "D" or "New" or null,
+  "grade": "A" or "B" or "C" or "D" or "New" or "Like New" or "Good" or null,
   "priceMin": number or null,
   "priceMax": number or null,
   "phoneOrigin": "USA" or "Hong Kong" or "Japan" or "Australia" or "Europe" or "Canada" or null,
@@ -58,24 +55,29 @@ Examples:
 - "iPhone 14 A-grade Nigeria under $250" → {"brand":"Apple","model":"iPhone 14","grade":"A","priceMax":250,"region":"Nigeria"}
 - "Samsung bulk cheap" → {"brand":"Samsung","priceMax":300}
 - "Best profit iPhones Japan origin" → {"brand":"Apple","phoneOrigin":"Japan"}
+- "iPhone 17 Like New" → {"brand":"Apple","model":"iPhone 17","grade":"Like New"}
 
-Return ONLY the JSON object.`
-      }]
-    });
+Return ONLY the JSON object.`;
 
-    // Extract JSON from Claude's response
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+
+    // Extract JSON from Gemini's response
     let searchParams;
     try {
-      const responseText = message.content[0].text.trim();
+      const responseText = response.text().trim();
       // Remove markdown code blocks if present
       const cleanJson = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '');
       searchParams = JSON.parse(cleanJson);
       console.log('📊 Parsed params:', searchParams);
     } catch (parseError) {
-      console.error('❌ Failed to parse Claude response:', parseError);
-      return res.status(500).json({ 
+      console.error('❌ Failed to parse Gemini response:', parseError);
+      return res.status(500).json({
+        success: false,
+        model: 'fallback',
         error: 'Failed to parse search query',
-        details: parseError.message 
+        details: parseError.message,
+        products: []
       });
     }
 
@@ -147,19 +149,24 @@ Return ONLY the JSON object.`
       });
     }
 
-    // Step 5: Return results
+    // Step 5: Return results in format frontend expects
     res.json({
+      success: true,
       query: query,
+      model: 'Flash',
+      message: `Found ${products.length} products`,
       parsedParams: searchParams,
-      resultsCount: products.length,
       products: products
     });
 
   } catch (error) {
     console.error('❌ Search error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
+      success: false,
+      model: 'fallback',
       error: 'Search failed',
-      message: error.message 
+      message: error.message,
+      products: []
     });
   }
 });
